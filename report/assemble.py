@@ -1,14 +1,21 @@
 from collections.abc import Callable, Iterable
 
-from evidence.body import decode_evidence_body
+from evidence.body import decode_dwell_body, decode_evidence_body
 from evidence.envelope import read_envelope
-from intake.catalog import ReceiptCatalog
+from intake.catalog import Receipt, ReceiptCatalog
 from intake.selection import select_receipts
 from report.account import account_cycles
 from report.cycles import CyclePoint, settle_cycles
 from report.publication import PublishedReport, publish_report
 from report.repository import ReportRepository, StoredReport
-from source.series import turning_samples
+from source.series import Sample, turning_samples
+
+
+def body_points(receipt: Receipt) -> tuple[Sample, ...]:
+    envelope = read_envelope(receipt.original)
+    if envelope.version == 2:
+        return decode_dwell_body(envelope.body).points
+    return decode_evidence_body(envelope.body).points
 
 
 def assemble_report(
@@ -22,8 +29,7 @@ def assemble_report(
     if repository.connection is not catalog.connection:
         raise ValueError('reports and receipts must use the same center connection')
     receipts = select_receipts(catalog, receipt_ids)
-    bodies = (decode_evidence_body(read_envelope(receipt.original).body) for receipt in receipts)
-    candidates = (point for body in bodies for point in body.points)
+    candidates = (point for receipt in receipts for point in body_points(receipt))
     turns = turning_samples(candidates)
     points = (CyclePoint(turn.beat, turn.load) for turn in turns)
     account = account_cycles(settle_cycles(points))

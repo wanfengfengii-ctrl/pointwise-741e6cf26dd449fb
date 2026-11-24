@@ -15,6 +15,13 @@ class EvidenceArchive:
                 original TEXT NOT NULL
             )
         ''')
+        self.connection.execute('''
+            CREATE TABLE IF NOT EXISTS issued_dwell_evidence (
+                shift_id TEXT PRIMARY KEY NOT NULL REFERENCES frozen_shifts (id),
+                piece_id TEXT UNIQUE NOT NULL,
+                original TEXT NOT NULL
+            )
+        ''')
 
     def get_by_shift(self, shift_id: str) -> str | None:
         if not isinstance(shift_id, str):
@@ -45,4 +52,37 @@ class EvidenceArchive:
             archived = self.get_by_shift(envelope.shift_id)
             if archived is None:
                 raise RuntimeError('issued original was not archived')
+        return archived
+
+    def get_dwell_by_shift(self, shift_id: str) -> str | None:
+        if not isinstance(shift_id, str):
+            return None
+        row = self.connection.execute(
+            'SELECT original FROM issued_dwell_evidence WHERE shift_id = ?', (shift_id,)
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def get_dwell_by_piece(self, piece_id: str) -> str | None:
+        if not isinstance(piece_id, str):
+            return None
+        row = self.connection.execute(
+            'SELECT original FROM issued_dwell_evidence WHERE piece_id = ?', (piece_id,)
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def put_dwell_original(self, original: str) -> str:
+        envelope = read_envelope(original)
+        if envelope.version != 2:
+            raise ValueError('dwell evidence requires a V2 original')
+        if self.connection.in_transaction:
+            raise RuntimeError('issuance requires an idle station connection')
+        with self.connection:
+            self.connection.execute(
+                '''INSERT INTO issued_dwell_evidence VALUES (?, ?, ?)
+                   ON CONFLICT (shift_id) DO NOTHING''',
+                (envelope.shift_id, envelope.piece_id, original),
+            )
+            archived = self.get_dwell_by_shift(envelope.shift_id)
+            if archived is None:
+                raise RuntimeError('issued dwell original was not archived')
         return archived

@@ -12,6 +12,13 @@ class Sample:
 
 
 @dataclass(frozen=True)
+class LoadRun:
+    first: int
+    last: int
+    load: Fraction
+
+
+@dataclass(frozen=True)
 class MeasurementRevision:
     revision_id: str
     specimen: str
@@ -75,3 +82,31 @@ def turning_samples(samples: Iterable[Sample]) -> tuple[Sample, ...]:
             turns.append(middle)
     turns.append(plateaus[-1])
     return tuple(turns)
+
+
+def plateau_runs(samples: Iterable[Sample]) -> tuple[LoadRun, ...]:
+    """Fold adjacent equal loads into first/last original beat runs."""
+    runs: list[LoadRun] = []
+    for sample in samples:
+        if runs and runs[-1].load == sample.load:
+            previous = runs[-1]
+            runs[-1] = LoadRun(previous.first, sample.beat, previous.load)
+        else:
+            runs.append(LoadRun(sample.beat, sample.beat, sample.load))
+    return tuple(runs)
+
+
+def turning_runs(samples: Iterable[Sample]) -> tuple[LoadRun, ...]:
+    """Keep the ends and reversals with their full equal-value extent."""
+    runs = plateau_runs(samples)
+    if len(runs) < 3:
+        return runs
+
+    kept = [runs[0]]
+    for left, middle, right in zip(runs, runs[1:], runs[2:]):
+        rises_to_middle = left.load < middle.load
+        rises_from_middle = middle.load < right.load
+        if rises_to_middle != rises_from_middle:
+            kept.append(middle)
+    kept.append(runs[-1])
+    return tuple(kept)

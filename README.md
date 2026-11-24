@@ -24,6 +24,12 @@ python3 -B -m unittest tests.test_history.HistoryTests.test_correct_and_reopen
 
 演示在临时目录创建站库和中心库，分别关闭站库后签发旧账和勘误账，再重开中心按原号领取两份定稿。`POINTWISE_SCENARIO` 记录含输入、独立手算预期、实算账和原件及回执反查结果。原样例的完整循环幅差为 2 kN，归第 2、5 拍，另有一个幅差 6 kN 的半循环。更正第 4、6 拍后，幅差 2、4、6 kN 各有一个半循环。
 
+复测演示签发高载停驻复测单，覆盖跨班切点落进等值区间、修订使等值区间缩短和旧件混入三类样例：
+
+```sh
+python3 -B -m unittest tests.test_retest.RetestDemoTests
+```
+
 ## 业务和接口
 
 | 步骤 | 调用及结果 |
@@ -37,8 +43,11 @@ python3 -B -m unittest tests.test_history.HistoryTests.test_correct_and_reopen
 | 7. 原测勘误 | `source.correction.correct_measurements(measurements, specimen, parent_id, changes)` 按指定父修订更正已有原拍的读值，返回新修订号。旧快照及冻结绑定继续按旧号领取。 |
 | 8. 签发勘误账 | 另冻另发，明确按新实收号与仍适用的班件签发新定稿。 |
 | 9. 历史领取 | `report.publication.get_report(reports, catalog, report_id)` 领取原定稿、原父件及回执。未知号返回 `None`。 |
+| 10. 停驻班件交付 | `evidence.issuer.issue_dwell_evidence(measurements, shifts, archive, shift_id)` 为新冻结班次签发 V2 JSON 文本，正文带平台首末原拍。补发读取存档原件。 |
+| 11. 高载停驻复测 | `report.retest.assemble_retest_sheet(catalog, sheets, receipt_ids, min_amplitude, min_dwell)` 按实收班件签出复测单，返回 `PublishedSheet`，包含入单明细、门槛、有序出处和签收回执。 |
+| 12. 复测单领取 | `report.retest.get_retest_sheet(sheets, catalog, sheet_id)` 领取已定稿复测单、原父件及回执。未知号返回 `None`。 |
 
-站库连接用于 `MeasurementRepository`、`ShiftRepository` 和 `EvidenceArchive`，按此顺序调用 `initialize()`。中心库使用另一个连接，`ReceiptCatalog` 与 `ReportRepository` 共用此中心连接，分别调用 `initialize()`。连接使用 `sqlite3.connect()` 的默认事务模式并开启 `PRAGMA foreign_keys = ON`。公开写入口调用前连接须空闲，由入口管理事务。初始化补建结构，保留已有数据、勘误和成果，样例仅由测试及演示装入临时库。
+站库连接用于 `MeasurementRepository`、`ShiftRepository` 和 `EvidenceArchive`，按此顺序调用 `initialize()`。中心库使用另一个连接，`ReceiptCatalog`、`ReportRepository` 与 `RetestRepository` 共用此中心连接，分别调用 `initialize()`。连接使用 `sqlite3.connect()` 的默认事务模式并开启 `PRAGMA foreign_keys = ON`。公开写入口调用前连接须空闲，由入口管理事务。初始化补建结构，保留已有数据、勘误和成果，样例仅由测试及演示装入临时库。
 
 ## 口径与错误
 
@@ -46,6 +55,10 @@ python3 -B -m unittest tests.test_history.HistoryTests.test_correct_and_reopen
 
 V1 外层含 `version`、`piece_id`、`shift_id`、`measurement_id`、`coverage` 及 `body`。`body` 是带来源与覆盖的精确 JSON 文本，`piece_id` 绑定其 UTF-8 内容。正文传递班内候选首末、反转和平台首达原拍。逐拍原测保存在站库。中心先核对来源和覆盖，再按实际选件恢复整卷核定点。
 
+V2 班件支持停驻核验：外层 `version` 为 2，正文以 `runs` 传递各转折平台的首末原拍和载荷，不带逐拍原始读值，也不含非平台单调中间拍；首段起于覆盖首拍，末段止于覆盖末拍，相邻段载荷不得相同。V1 与 V2 班件中心均实收，整卷疲劳账凭任一版本的核定点继续可签。
+
 连续等值平台折成一点，归整个平台的首达原拍。核定点是首末及方向反转处。从左起找首个满足中间幅差不大于两侧相邻幅差的四点窗口，计一个完整循环，记录中间两点的原拍并移除这两点，重新从左检查。剩余相邻点各计一个半循环。幅差按精确有理值分组，分别给出完整次数和半循环个数。单拍及全等值卷产出空账。单班账按该班独立结算，签发整卷账时用整卷核定点重新计算。
 
-签发事务共同写入账、出处和签发回执，成功提交后返回。回归覆盖写报告后、提交前中断和重开重试。完整回归还覆盖精确载荷回读、整批拒绝、固定件补发、同范围新旧件、切班位置与平台归责、选件拒绝、旧号领取以及重复初始化。
+复测单只列整卷账中的完整循环：循环幅差不小于申请下限，且高载端连续等值停驻的原拍数不小于申请下限，两项门槛均含等号，半循环不入单。相邻已选班件在接缝处载荷相同视为一次停驻，只计实际有来源的原拍；高载端前后再出现同载荷但中间隔有不同读值的，分段看待。每条入单记录给出原循环两个端点、幅差、高载端等值区间的首末原拍和拍数，以及区间实际经过的每件冻结件和原测修订，按原账结算顺序交付。申请混用无法核验停驻的 V1 班件时引发 `UnverifiableDwellError`，其 `pending` 给出具体待补实收号，不写入任何记录，双方旧件和旧结果保留；待补班件必须对应原先选定的固定修订和覆盖范围。每次已签复测单的原选件、门槛、明细和出处均持久化，后续勘误和再次申请另签新单，重开中心可按原号领取。
+
+签发事务共同写入账、出处和签发回执，成功提交后返回。回归覆盖写报告后、提交前中断和重开重试。完整回归还覆盖精确载荷回读、整批拒绝、固定件补发、同范围新旧件、切班位置与平台归责、选件拒绝、旧号领取以及重复初始化。复测回归另覆盖接缝停驻合并、等值区间分段、门槛等号、半循环排除、结算顺序、签发回滚、非法门槛以及 V2 班件格式核验。

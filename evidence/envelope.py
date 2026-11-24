@@ -12,6 +12,7 @@ class EvidenceEnvelope:
     measurement_id: str
     coverage: EvidenceCoverage
     body: str
+    version: int = 1
 
 
 def canonical_json(value: object) -> str:
@@ -48,10 +49,10 @@ def piece_identity(body: str) -> str:
 
 
 def make_envelope(
-    body: str, shift_id: str, measurement_id: str, coverage: EvidenceCoverage
+    body: str, shift_id: str, measurement_id: str, coverage: EvidenceCoverage, *, version: int = 1
 ) -> str:
     return canonical_json({
-        'version': 1,
+        'version': version,
         'piece_id': piece_identity(body),
         'shift_id': shift_id,
         'measurement_id': measurement_id,
@@ -63,13 +64,14 @@ def make_envelope(
 def read_envelope(serialized: str) -> EvidenceEnvelope:
     value = decode_object(serialized)
     if value.keys() != {'version', 'piece_id', 'shift_id', 'measurement_id', 'coverage', 'body'}:
-        raise ValueError('invalid V1 envelope fields')
-    if type(value['version']) is not int or value['version'] != 1:
+        raise ValueError('invalid evidence envelope fields')
+    if type(value['version']) is not int or value['version'] not in (1, 2):
         raise ValueError('unsupported evidence version')
     body = value['body']
     if not isinstance(body, str):
-        raise ValueError('V1 body must be JSON text')
+        raise ValueError('evidence body must be JSON text')
     return EvidenceEnvelope(
         require_identity(value['piece_id']), require_identity(value['shift_id']),
         require_identity(value['measurement_id']), parse_coverage(value['coverage']), body,
+        value['version'],
     )
